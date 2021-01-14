@@ -10,6 +10,16 @@ class TestFunction extends EventEmitter {
     const setLog = (index: number, value: string) => { logs[Object.keys(logs)[index]] = typeof value === 'string' ? value.trim() : value }
 
     browser
+    .perform((done) => {
+      if (txHash === 'last') {
+        browser.getLastTransactionHash((hash) => {
+          txHash = hash
+          done()
+        })
+      } else {
+        done()
+      }
+    })
     .waitForElementVisible(`[data-id="block_tx${txHash}"]`)
     .click(`[data-id="block_tx${txHash}"]`)
     .waitForElementVisible(`*[data-id="txLoggerTable${txHash}"]`)

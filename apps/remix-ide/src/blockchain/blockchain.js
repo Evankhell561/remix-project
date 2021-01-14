@@ -3,7 +3,8 @@ const txFormat = remixLib.execution.txFormat
 const txExecution = remixLib.execution.txExecution
 const typeConversion = remixLib.execution.typeConversion
 const Txlistener = remixLib.execution.txListener
-const TxRunner = remixLib.execution.txRunner
+const TxRunner = remixLib.execution.TxRunner
+const TxRunnerWeb3 = remixLib.execution.TxRunnerWeb3
 const txHelper = remixLib.execution.txHelper
 const EventManager = remixLib.EventManager
 const executionContext = remixLib.execution.executionContext
@@ -26,8 +27,7 @@ class Blockchain {
 
     this.events = new EventEmitter()
     this.config = config
-
-    this.txRunner = new TxRunner({}, {
+    const web3Runner = new TxRunnerWeb3({
       config: config,
       detectNetwork: (cb) => {
         this.executionContext.detectNetwork(cb)
@@ -35,7 +35,9 @@ class Blockchain {
       personalMode: () => {
         return this.getProvider() === 'web3' ? this.config.get('settings/personal-mode') : false
       }
-    }, this.executionContext)
+    }, _ => this.executionContext.web3(), _ => this.executionContext.currentblockGasLimit())
+    this.txRunner = new TxRunner(web3Runner, { runAsync: true })
+
     this.executionContext.event.register('contextChanged', this.resetEnvironment.bind(this))
 
     this.networkcallid = 0
@@ -123,7 +125,7 @@ class Blockchain {
         if (error) {
           return finalCb(`creation of ${selectedContract.name} errored: ${(error.message ? error.message : error)}`)
         }
-        if (txResult.result.status && txResult.result.status === '0x0') {
+        if (txResult.receipt.status === false || txResult.receipt.status === '0x0') {
           return finalCb(`creation of ${selectedContract.name} errored: transaction execution failed`)
         }
         finalCb(null, selectedContract, address)
@@ -309,18 +311,17 @@ class Blockchain {
   resetEnvironment () {
     this.getCurrentProvider().resetEnvironment()
     // TODO: most params here can be refactored away in txRunner
-    // this.txRunner = new TxRunner(this.providers.vm.accounts, {
-    this.txRunner = new TxRunner(this.providers.vm.RemixSimulatorProvider.Accounts.accounts, {
-      // TODO: only used to check value of doNotShowTransactionConfirmationAgain property
+    const web3Runner = new TxRunnerWeb3({
       config: this.config,
-      // TODO: to refactor, TxRunner already has access to executionContext
       detectNetwork: (cb) => {
         this.executionContext.detectNetwork(cb)
       },
       personalMode: () => {
         return this.getProvider() === 'web3' ? this.config.get('settings/personal-mode') : false
       }
-    }, this.executionContext)
+    }, _ => this.executionContext.web3(), _ => this.executionContext.currentblockGasLimit())
+
+    this.txRunner = new TxRunner(web3Runner, { runAsync: true })
     this.txRunner.event.register('transactionBroadcasted', (txhash) => {
       this.executionContext.detectNetwork((error, network) => {
         if (error || !network) return
@@ -439,7 +440,7 @@ class Blockchain {
           function (error, result) {
             if (error) return next(error)
 
-            const rawAddress = self.executionContext.isVM() ? result.result.createdAddress : result.result.contractAddress
+            const rawAddress = result.receipt.contractAddress
             const eventName = (tx.useCall ? 'callExecuted' : 'transactionExecuted')
             self.event.trigger(eventName, [error, tx.from, tx.to, tx.data, tx.useCall, result, timestamp, payLoad, rawAddress])
 
@@ -454,14 +455,16 @@ class Blockchain {
         )
       }
     ],
-    (error, txResult) => {
+    async (error, txResult) => {
       if (error) {
         return cb(error)
       }
 
       const isVM = this.executionContext.isVM()
+      let execResult
       if (isVM) {
-        const vmError = txExecution.checkVMError(txResult)
+        const execResult = await this.web3().eth.getExecutionResultFromSimulator(txResult.transactionHash)
+        const vmError = txExecution.checkVMError(execResult)
         if (vmError.error) {
           return cb(vmError.message)
         }
@@ -469,10 +472,10 @@ class Blockchain {
 
       let address = null
       let returnValue = null
-      if (txResult && txResult.result) {
-        address = isVM ? txResult.result.createdAddress : txResult.result.contractAddress
+      if (txResult && txResult) {
+        address = txResult.receipt.contractAddress
         // if it's not the VM, we don't have return value. We only have the transaction, and it does not contain the return value.
-        returnValue = (txResult.result.execResult && isVM) ? txResult.result.execResult.returnValue : txResult.result
+        returnValue = (execResult && isVM) ? execResult.returnValue : txResult
       }
 
       cb(error, txResult, address, returnValue)

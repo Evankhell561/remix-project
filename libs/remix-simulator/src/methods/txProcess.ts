@@ -1,6 +1,8 @@
 import { execution }  from '@remix-project/remix-lib'
 const TxExecution = execution.txExecution
-const TxRunner = execution.txRunner
+const TxRunnerVM = execution.TxRunnerVM
+const TxRunner = execution.TxRunner
+
 
 function runCall (payload, from, to, data, value, gasLimit, txRunner, callbacks, callback) {
   const finalCallback = function (err, result) {
@@ -20,7 +22,7 @@ function runTx (payload, from, to, data, value, gasLimit, txRunner, callbacks, c
     if (err) {
       return callback(err)
     }
-    callback(null, result.transactionHash)
+    callback(null, result)
   }
 
   TxExecution.callFunction(from, to, data, value, gasLimit, { constant: false }, txRunner, callbacks, finalCallback)
@@ -31,15 +33,16 @@ function createContract (payload, from, data, value, gasLimit, txRunner, callbac
     if (err) {
       return callback(err)
     }
-    callback(null, result.transactionHash)
+    callback(null, result)
   }
 
   TxExecution.createContract(from, data, value, gasLimit, txRunner, callbacks, finalCallback)
 }
 
+let txRunnerVMInstance
 let txRunnerInstance
 
-export function processTx (executionContext, accounts, payload, isCall, callback) {
+export function processTx (vmContext, accounts, payload, isCall, callback) {
   const api = {
     logMessage: (msg) => {
     },
@@ -61,11 +64,11 @@ export function processTx (executionContext, accounts, payload, isCall, callback
     }
   }
 
-  executionContext.init(api.config)
-
-  // let txRunner = new TxRunner(accounts, api)
+  if (!txRunnerVMInstance) {
+    txRunnerVMInstance = new TxRunnerVM(accounts, api, _ => vmContext.vm())
+  }
   if (!txRunnerInstance) {
-    txRunnerInstance = new TxRunner(accounts, api, executionContext)
+    txRunnerInstance = new TxRunner(txRunnerVMInstance, { runAsync: false })
   }
   txRunnerInstance.vmaccounts = accounts
   let { from, to, data, value, gas } = payload.params[0]
