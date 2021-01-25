@@ -95,6 +95,7 @@ class FileProvider {
     var unprefixedpath = this.removePrefix(path)
     var exists = window.remixFileSystem.existsSync(unprefixedpath)
     if (exists && window.remixFileSystem.readFileSync(unprefixedpath, 'utf8') === content) {
+      this.event.trigger('fileChanged', [this._normalizePath(unprefixedpath)])
       cb()
       return true
     }
